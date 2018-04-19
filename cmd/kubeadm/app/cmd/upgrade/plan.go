@@ -62,14 +62,34 @@ func RunPlan(parentFlags *cmdUpgradeFlags) error {
 		return err
 	}
 
-	// Define Local Etcd cluster to be able to retrieve information
-	etcdClient, err := etcdutil.NewStaticPodClient(
-		[]string{"localhost:2379"},
-		constants.GetStaticPodDirectory(),
-		upgradeVars.cfg.CertificatesDir,
-	)
-	if err != nil {
-		return err
+	var etcdClient etcdutil.Client
+
+	// Currently this is the only method we have for distinguising
+	// external etcd vs static pod etcd
+	isExternalEtcd := len(upgradeVars.cfg.Etcd.Endpoints) > 0
+	if isExternalEtcd {
+		// Create external etcd client
+		client, err := etcdutil.NewClient(
+			upgradeVars.cfg.Etcd.Endpoints,
+			upgradeVars.cfg.Etcd.CAFile,
+			upgradeVars.cfg.Etcd.CertFile,
+			upgradeVars.cfg.Etcd.KeyFile,
+		)
+		if err != nil {
+			return err
+		}
+		etcdClient = client
+	} else {
+		// Create local etcd client
+		client, err := etcdutil.NewStaticPodClient(
+			[]string{"localhost:2379"},
+			constants.GetStaticPodDirectory(),
+			upgradeVars.cfg.CertificatesDir,
+		)
+		if err != nil {
+			return err
+		}
+		etcdClient = client
 	}
 
 	// Compute which upgrade possibilities there are
@@ -80,13 +100,13 @@ func RunPlan(parentFlags *cmdUpgradeFlags) error {
 	}
 
 	// Tell the user which upgrades are available
-	printAvailableUpgrades(availUpgrades, os.Stdout, upgradeVars.cfg.FeatureGates)
+	printAvailableUpgrades(availUpgrades, os.Stdout, upgradeVars.cfg.FeatureGates, isExternalEtcd)
 	return nil
 }
 
 // printAvailableUpgrades prints a UX-friendly overview of what versions are available to upgrade to
 // TODO look into columnize or some other formatter when time permits instead of using the tabwriter
-func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGates map[string]bool) {
+func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGates map[string]bool, isExternalEtcd bool) {
 
 	// Return quickly if no upgrades can be made
 	if len(upgrades) == 0 {
@@ -99,9 +119,20 @@ func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGate
 	// Loop through the upgrade possibilities and output text to the command line
 	for _, upgrade := range upgrades {
 
+		if isExternalEtcd && upgrade.CanUpgradeEtcd() {
+			fmt.Fprintln(w, "External components that should be upgraded manually before you upgrade the control plane with 'kubeadm upgrade apply':")
+			fmt.Fprintln(tabw, "COMPONENT\tCURRENT\tAVAILABLE")
+			fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+
+			// We should flush the writer here at this stage; as the columns will now be of the right size, adjusted to the above content
+			tabw.Flush()
+			fmt.Fprintln(w, "")
+		}
+
 		if upgrade.CanUpgradeKubelets() {
 			fmt.Fprintln(w, "Components that must be upgraded manually after you have upgraded the control plane with 'kubeadm upgrade apply':")
 			fmt.Fprintln(tabw, "COMPONENT\tCURRENT\tAVAILABLE")
+
 			firstPrinted := false
 
 			// The map is of the form <old-version>:<node-count>. Here all the keys are put into a slice and sorted
@@ -133,7 +164,9 @@ func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGate
 		} else {
 			fmt.Fprintf(tabw, "Kube DNS\t%s\t%s\n", upgrade.Before.DNSVersion, upgrade.After.DNSVersion)
 		}
-		fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+		if !isExternalEtcd {
+			fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+		}
 
 		// The tabwriter should be flushed at this stage as we have now put in all the required content for this time. This is required for the tabs' size to be correct.
 		tabw.Flush()

@@ -50,6 +50,11 @@ func (u *Upgrade) CanUpgradeKubelets() bool {
 	return !sameVersionFound
 }
 
+// CanUpgradeEtcd returns whether an upgrade of etcd is possible
+func (u *Upgrade) CanUpgradeEtcd() bool {
+	return u.Before.EtcdVersion != u.After.EtcdVersion
+}
+
 // ActiveDNSAddon returns the version of CoreDNS or kube-dns
 func ActiveDNSAddon(featureGates map[string]bool) string {
 	if features.Enabled(featureGates, features.CoreDNS) {
@@ -106,8 +111,8 @@ func GetAvailableUpgrades(versionGetterImpl VersionGetter, experimentalUpgradesA
 		return nil, err
 	}
 
-	// Get current etcd version
-	etcdStatus, err := etcdClient.GetStatus()
+	// Get the etcd member version
+	etcdVersion, err := etcdClient.GetVersion()
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +123,7 @@ func GetAvailableUpgrades(versionGetterImpl VersionGetter, experimentalUpgradesA
 		DNSVersion:      dns.GetDNSVersion(clusterVersion, ActiveDNSAddon(featureGates)),
 		KubeadmVersion:  kubeadmVersionStr,
 		KubeletVersions: kubeletVersions,
-		EtcdVersion:     etcdStatus.Version,
+		EtcdVersion:     etcdVersion,
 	}
 
 	// Do a "dumb guess" that a new minor upgrade is available just because the latest stable version is higher than the cluster version

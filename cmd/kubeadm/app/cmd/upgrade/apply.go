@@ -50,6 +50,7 @@ type applyFlags struct {
 	force              bool
 	dryRun             bool
 	etcdUpgrade        bool
+	externalEtcd       bool
 	newK8sVersionStr   string
 	newK8sVersion      *version.Version
 	imagePullTimeout   time.Duration
