@@ -65,14 +65,33 @@ func RunPlan(parentFlags *cmdUpgradeFlags) error {
 		return err
 	}
 
-	// Define Local Etcd cluster to be able to retrieve information
-	etcdClient, err := etcdutil.NewStaticPodClient(
-		[]string{"localhost:2379"},
-		constants.GetStaticPodDirectory(),
-		upgradeVars.cfg.CertificatesDir,
-	)
-	if err != nil {
-		return err
+	var etcdClient etcdutil.Client
+
+	// Currently this is the only method we have for distinguising
+	// external etcd vs static pod etcd
+	if len(upgradeVars.cfg.Etcd.Endpoints) > 0 {
+		// Create external etcd client
+		client, err := etcdutil.NewClient(
+			upgradeVars.cfg.Etcd.Endpoints,
+			upgradeVars.cfg.Etcd.CAFile,
+			upgradeVars.cfg.Etcd.CertFile,
+			upgradeVars.cfg.Etcd.KeyFile,
+		)
+		if err != nil {
+			return err
+		}
+		etcdClient = client
+	} else {
+		// Create local etcd client
+		client, err := etcdutil.NewStaticPodClient(
+			[]string{"localhost:2379"},
+			constants.GetStaticPodDirectory(),
+			upgradeVars.cfg.CertificatesDir,
+		)
+		if err != nil {
+			return err
+		}
+		etcdClient = client
 	}
 
 	// Compute which upgrade possibilities there are

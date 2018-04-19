@@ -106,8 +106,8 @@ func GetAvailableUpgrades(versionGetterImpl VersionGetter, experimentalUpgradesA
 		return nil, err
 	}
 
-	// Get current etcd version
-	etcdStatus, err := etcdClient.GetStatus()
+	// Get the etcd member version
+	etcdVersion, err := etcdClient.GetVersion()
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func GetAvailableUpgrades(versionGetterImpl VersionGetter, experimentalUpgradesA
 		DNSVersion:      dns.GetDNSVersion(clusterVersion, ActiveDNSAddon(featureGates)),
 		KubeadmVersion:  kubeadmVersionStr,
 		KubeletVersions: kubeletVersions,
-		EtcdVersion:     etcdStatus.Version,
+		EtcdVersion:     etcdVersion,
 	}
 
 	// Do a "dumb guess" that a new minor upgrade is available just because the latest stable version is higher than the cluster version

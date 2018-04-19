@@ -32,9 +32,13 @@ import (
 
 // Client is an interface to get etcd cluster related information
 type Client interface {
+	ClusterAvailable() (bool, error)
+	GetClusterStatus() (map[string]*clientv3.StatusResponse, error)
+	GetClusterVersions() (map[string]string, error)
 	GetStatus() (*clientv3.StatusResponse, error)
+	GetVersion() (string, error)
+	HasTLS() (bool, error)
 	WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error)
-	HasTLS() bool
 }
 
 // GenericClient is a common etcd client for supported etcd servers
@@ -44,8 +48,8 @@ type GenericClient struct {
 }
 
 // HasTLS returns true if etcd is configured for TLS
-func (c GenericClient) HasTLS() bool {
-	return c.TLSConfig != nil
+func (c GenericClient) HasTLS() (bool, error) {
+	return c.TLSConfig != nil, nil
 }
 
 // PodManifestsHaveTLS reads the etcd staticpod manifest from disk and returns false if the TLS flags
@@ -81,6 +85,79 @@ FlagLoop:
 	}
 	// all flags were found in container args; pod fully implements TLS
 	return true, nil
+}
+
+// GetVersion returns the etcd version of the cluster.
+// An error is returned if the version of all endpoints do not match
+func (c GenericClient) GetVersion() (string, error) {
+	var clusterVersion string
+
+	versions, err := c.GetClusterVersions()
+	if err != nil {
+		return "", err
+	}
+	for _, v := range versions {
+		if clusterVersion == "" {
+			// This is the first version we've seen
+			clusterVersion = v
+		} else if v != clusterVersion {
+			return "", fmt.Errorf("etcd cluster contains endpoints with mismatched versions: %v", versions)
+		} else {
+			clusterVersion = v
+		}
+	}
+	if clusterVersion == "" {
+		return "", fmt.Errorf("could not determine cluster etcd version")
+	}
+	return clusterVersion, nil
+}
+
+// GetClusterVersions returns a map of the endpoints and their associated versions
+func (c GenericClient) GetClusterVersions() (map[string]string, error) {
+	var versions map[string]string
+	statuses, err := c.GetClusterStatus()
+	if err != nil {
+		return versions, err
+	}
+
+	for ep, status := range statuses {
+		versions[ep] = status.Version
+	}
+	return versions, nil
+}
+
+// ClusterAvailable returns true if the cluster status indicates the cluster is available.
+func (c GenericClient) ClusterAvailable() (bool, error) {
+	_, err := c.GetClusterStatus()
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// GetClusterStatus returns a slice of StatusResponses containing a StatusResponse for each endpoint in the cluster
+func (c GenericClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, error) {
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   c.Endpoints,
+		DialTimeout: 5 * time.Second,
+		TLS:         c.TLSConfig,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
+
+	var clusterStatus map[string]*clientv3.StatusResponse
+	for _, ep := range c.Endpoints {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := cli.Status(ctx, ep)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		clusterStatus[ep] = resp
+	}
+	return clusterStatus, nil
 }
 
 // GetStatus gets server status

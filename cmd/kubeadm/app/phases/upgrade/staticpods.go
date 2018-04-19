@@ -411,7 +411,10 @@ func StaticPodControlPlane(waiter apiclient.Waiter, pathMgr StaticPodPathManager
 
 	// etcd upgrade is done prior to other control plane components
 	if !isExternalEtcd && etcdUpgrade {
-		previousEtcdHasTLS := oldEtcdClient.HasTLS()
+		previousEtcdHasTLS, err := oldEtcdClient.HasTLS()
+		if err != nil {
+			return fmt.Errorf("failed to determine if etcd is configured for tls: %v", err)
+		}
 
 		// set the TLS upgrade flag for all components
 		isTLSUpgrade = !previousEtcdHasTLS

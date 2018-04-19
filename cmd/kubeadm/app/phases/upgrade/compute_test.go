@@ -62,17 +62,38 @@ func (f *fakeVersionGetter) KubeletVersions() (map[string]uint16, error) {
 	}, nil
 }
 
-type fakeEtcdCluster struct{ TLS bool }
+type fakeEtcdClient struct{ TLS bool }
 
-func (f fakeEtcdCluster) HasTLS() bool { return f.TLS }
+func (f fakeEtcdClient) ClusterAvailable() (bool, error) { return true, nil }
 
-func (f fakeEtcdCluster) GetStatus() (*clientv3.StatusResponse, error) {
+func (f fakeEtcdClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, error) {
+	status, err := f.GetStatus()
+	return map[string]*clientv3.StatusResponse{
+		"foo": status,
+	}, err
+}
+
+func (f fakeEtcdClient) GetClusterVersions() (map[string]string, error) {
+	version, err := f.GetVersion()
+	return map[string]string{
+		"foo": version,
+	}, err
+}
+
+func (f fakeEtcdClient) GetStatus() (*clientv3.StatusResponse, error) {
 	client := &clientv3.StatusResponse{}
 	client.Version = "3.1.12"
 	return client, nil
 }
 
-func (f fakeEtcdCluster) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
+func (f fakeEtcdClient) GetVersion() (string, error) {
+	status, err := f.GetStatus()
+	return status.Version, err
+}
+
+func (f fakeEtcdClient) HasTLS() (bool, error) { return f.TLS, nil }
+
+func (f fakeEtcdClient) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
 	return f.GetStatus()
 }
 
@@ -450,7 +471,7 @@ func TestGetAvailableUpgrades(t *testing.T) {
 
 	// Instantiating a fake etcd cluster for being able to get etcd version for a corresponding
 	// kubernetes release.
-	testCluster := fakeEtcdCluster{}
+	testCluster := fakeEtcdClient{}
 	for _, rt := range tests {
 		actualUpgrades, actualErr := GetAvailableUpgrades(rt.vg, rt.allowExperimental, rt.allowRCs, testCluster, featureGates)
 		if !reflect.DeepEqual(actualUpgrades, rt.expectedUpgrades) {

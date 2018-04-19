@@ -211,8 +211,20 @@ func (spm *fakeStaticPodPathManager) BackupEtcdDir() string {
 
 type fakeTLSEtcdClient struct{ TLS bool }
 
-func (c fakeTLSEtcdClient) HasTLS() bool {
-	return c.TLS
+func (c fakeTLSEtcdClient) ClusterAvailable() (bool, error) { return true, nil }
+
+func (c fakeTLSEtcdClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, error) {
+	status, err := c.GetStatus()
+	return map[string]*clientv3.StatusResponse{
+		"foo": status,
+	}, err
+}
+
+func (c fakeTLSEtcdClient) GetClusterVersions() (map[string]string, error) {
+	version, err := c.GetVersion()
+	return map[string]string{
+		"foo": version,
+	}, err
 }
 
 func (c fakeTLSEtcdClient) GetStatus() (*clientv3.StatusResponse, error) {
@@ -221,15 +233,40 @@ func (c fakeTLSEtcdClient) GetStatus() (*clientv3.StatusResponse, error) {
 	return client, nil
 }
 
+func (c fakeTLSEtcdClient) GetVersion() (string, error) {
+	status, err := c.GetStatus()
+	return status.Version, err
+}
+
+func (c fakeTLSEtcdClient) HasTLS() (bool, error) {
+	return c.TLS, nil
+}
+
 func (c fakeTLSEtcdClient) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
 	return c.GetStatus()
 }
 
 type fakePodManifestEtcdClient struct{ ManifestDir, CertificatesDir string }
 
-func (c fakePodManifestEtcdClient) HasTLS() bool {
-	hasTLS, _ := etcdutil.PodManifestsHaveTLS(c.ManifestDir)
-	return hasTLS
+func (c fakePodManifestEtcdClient) ClusterAvailable() (bool, error) { return true, nil }
+
+func (c fakePodManifestEtcdClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, error) {
+	status, err := c.GetStatus()
+	return map[string]*clientv3.StatusResponse{
+		"foo": status,
+	}, err
+}
+
+func (c fakePodManifestEtcdClient) GetClusterVersions() (map[string]string, error) {
+	version, err := c.GetVersion()
+	return map[string]string{
+		"foo": version,
+	}, err
+}
+
+func (c fakePodManifestEtcdClient) GetVersion() (string, error) {
+	status, err := c.GetStatus()
+	return status.Version, err
 }
 
 func (c fakePodManifestEtcdClient) GetStatus() (*clientv3.StatusResponse, error) {
@@ -247,6 +284,10 @@ func (c fakePodManifestEtcdClient) GetStatus() (*clientv3.StatusResponse, error)
 	client := &clientv3.StatusResponse{}
 	client.Version = "3.1.12"
 	return client, nil
+}
+
+func (c fakePodManifestEtcdClient) HasTLS() (bool, error) {
+	return etcdutil.PodManifestsHaveTLS(c.ManifestDir)
 }
 
 func (c fakePodManifestEtcdClient) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
