@@ -69,7 +69,8 @@ func RunPlan(parentFlags *cmdUpgradeFlags) error {
 
 	// Currently this is the only method we have for distinguising
 	// external etcd vs static pod etcd
-	if len(upgradeVars.cfg.Etcd.Endpoints) > 0 {
+	isExternalEtcd := len(upgradeVars.cfg.Etcd.Endpoints) > 0
+	if isExternalEtcd {
 		// Create external etcd client
 		client, err := etcdutil.NewClient(
 			upgradeVars.cfg.Etcd.Endpoints,
@@ -102,13 +103,13 @@ func RunPlan(parentFlags *cmdUpgradeFlags) error {
 	}
 
 	// Tell the user which upgrades are available
-	printAvailableUpgrades(availUpgrades, os.Stdout, upgradeVars.cfg.FeatureGates)
+	printAvailableUpgrades(availUpgrades, os.Stdout, upgradeVars.cfg.FeatureGates, isExternalEtcd)
 	return nil
 }
 
 // printAvailableUpgrades prints a UX-friendly overview of what versions are available to upgrade to
 // TODO look into columnize or some other formatter when time permits instead of using the tabwriter
-func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGates map[string]bool) {
+func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGates map[string]bool, isExternalEtcd bool) {
 
 	// Return quickly if no upgrades can be made
 	if len(upgrades) == 0 {
@@ -121,24 +122,31 @@ func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGate
 	// Loop through the upgrade possibilities and output text to the command line
 	for _, upgrade := range upgrades {
 
-		if upgrade.CanUpgradeKubelets() {
+		if upgrade.CanUpgradeKubelets() || (isExternalEtcd && upgrade.CanUpgradeKubelets()) {
 			fmt.Fprintln(w, "Components that must be upgraded manually after you have upgraded the control plane with 'kubeadm upgrade apply':")
 			fmt.Fprintln(tabw, "COMPONENT\tCURRENT\tAVAILABLE")
-			firstPrinted := false
 
-			// The map is of the form <old-version>:<node-count>. Here all the keys are put into a slice and sorted
-			// in order to always get the right order. Then the map value is extracted separately
-			for _, oldVersion := range sortedSliceFromStringIntMap(upgrade.Before.KubeletVersions) {
-				nodeCount := upgrade.Before.KubeletVersions[oldVersion]
-				if !firstPrinted {
-					// Output the Kubelet header only on the first version pair
-					fmt.Fprintf(tabw, "Kubelet\t%d x %s\t%s\n", nodeCount, oldVersion, upgrade.After.KubeVersion)
-					firstPrinted = true
-					continue
+			if upgrade.CanUpgradeKubelets() {
+				firstPrinted := false
+
+				// The map is of the form <old-version>:<node-count>. Here all the keys are put into a slice and sorted
+				// in order to always get the right order. Then the map value is extracted separately
+				for _, oldVersion := range sortedSliceFromStringIntMap(upgrade.Before.KubeletVersions) {
+					nodeCount := upgrade.Before.KubeletVersions[oldVersion]
+					if !firstPrinted {
+						// Output the Kubelet header only on the first version pair
+						fmt.Fprintf(tabw, "Kubelet\t%d x %s\t%s\n", nodeCount, oldVersion, upgrade.After.KubeVersion)
+						firstPrinted = true
+						continue
+					}
+					fmt.Fprintf(tabw, "\t%d x %s\t%s\n", nodeCount, oldVersion, upgrade.After.KubeVersion)
 				}
-				fmt.Fprintf(tabw, "\t%d x %s\t%s\n", nodeCount, oldVersion, upgrade.After.KubeVersion)
+				// We should flush the writer here at this stage; as the columns will now be of the right size, adjusted to the above content
 			}
-			// We should flush the writer here at this stage; as the columns will now be of the right size, adjusted to the above content
+
+			if isExternalEtcd && upgrade.CanUpgradeEtcd() {
+				fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+			}
 			tabw.Flush()
 			fmt.Fprintln(w, "")
 		}
@@ -155,7 +163,9 @@ func printAvailableUpgrades(upgrades []upgrade.Upgrade, w io.Writer, featureGate
 		} else {
 			fmt.Fprintf(tabw, "Kube DNS\t%s\t%s\n", upgrade.Before.DNSVersion, upgrade.After.DNSVersion)
 		}
-		fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+		if !isExternalEtcd {
+			fmt.Fprintf(tabw, "Etcd\t%s\t%s\n", upgrade.Before.EtcdVersion, upgrade.After.EtcdVersion)
+		}
 
 		// The tabwriter should be flushed at this stage as we have now put in all the required content for this time. This is required for the tabs' size to be correct.
 		tabw.Flush()

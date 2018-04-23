@@ -50,6 +50,11 @@ func (u *Upgrade) CanUpgradeKubelets() bool {
 	return !sameVersionFound
 }
 
+// CanUpgradeEtcd returns whether an upgrade of etcd is possible
+func (u *Upgrade) CanUpgradeEtcd() bool {
+	return u.Before.EtcdVersion != u.After.EtcdVersion
+}
+
 // ActiveDNSAddon returns the version of CoreDNS or kube-dns
 func ActiveDNSAddon(featureGates map[string]bool) string {
 	if features.Enabled(featureGates, features.CoreDNS) {

@@ -35,10 +35,9 @@ type Client interface {
 	ClusterAvailable() (bool, error)
 	GetClusterStatus() (map[string]*clientv3.StatusResponse, error)
 	GetClusterVersions() (map[string]string, error)
-	GetStatus() (*clientv3.StatusResponse, error)
 	GetVersion() (string, error)
 	HasTLS() (bool, error)
-	WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error)
+	WaitForClusterAvailable(delay time.Duration, retries int, retryInterval time.Duration) (bool, error)
 }
 
 // GenericClient is a common etcd client for supported etcd servers
@@ -114,7 +113,7 @@ func (c GenericClient) GetVersion() (string, error) {
 
 // GetClusterVersions returns a map of the endpoints and their associated versions
 func (c GenericClient) GetClusterVersions() (map[string]string, error) {
-	var versions map[string]string
+	versions := make(map[string]string)
 	statuses, err := c.GetClusterStatus()
 	if err != nil {
 		return versions, err
@@ -147,7 +146,7 @@ func (c GenericClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, 
 	}
 	defer cli.Close()
 
-	var clusterStatus map[string]*clientv3.StatusResponse
+	clusterStatus := make(map[string]*clientv3.StatusResponse)
 	for _, ep := range c.Endpoints {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		resp, err := cli.Status(ctx, ep)
@@ -160,30 +159,8 @@ func (c GenericClient) GetClusterStatus() (map[string]*clientv3.StatusResponse, 
 	return clusterStatus, nil
 }
 
-// GetStatus gets server status
-func (c GenericClient) GetStatus() (*clientv3.StatusResponse, error) {
-	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   c.Endpoints,
-		DialTimeout: 5 * time.Second,
-		TLS:         c.TLSConfig,
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer cli.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	resp, err := cli.Status(ctx, c.Endpoints[0])
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
-}
-
-// WaitForStatus returns a StatusResponse after an initial delay and retry attempts
-func (c GenericClient) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
+// WaitForClusterAvailable returns true if all endpoints in the cluster are availabe after an initial delay and retry attempts, an error is returned otherwise
+func (c GenericClient) WaitForClusterAvailable(delay time.Duration, retries int, retryInterval time.Duration) (bool, error) {
 	fmt.Printf("[util/etcd] Waiting %v for initial delay\n", delay)
 	time.Sleep(delay)
 	for i := 0; i < retries; i++ {
@@ -191,8 +168,8 @@ func (c GenericClient) WaitForStatus(delay time.Duration, retries int, retryInte
 			fmt.Printf("[util/etcd] Waiting %v until next retry\n", retryInterval)
 			time.Sleep(retryInterval)
 		}
-		fmt.Printf("[util/etcd] Attempting to get etcd status %d/%d\n", i+1, retries)
-		resp, err := c.GetStatus()
+		fmt.Printf("[util/etcd] Attempting to see if all cluster endpoints are available %d/%d\n", i+1, retries)
+		resp, err := c.ClusterAvailable()
 		if err != nil {
 			switch err {
 			case context.DeadlineExceeded:
@@ -204,7 +181,7 @@ func (c GenericClient) WaitForStatus(delay time.Duration, retries int, retryInte
 		}
 		return resp, nil
 	}
-	return nil, fmt.Errorf("timeout waiting for etcd cluster status")
+	return false, fmt.Errorf("timeout waiting for etcd cluster to be available")
 }
 
 // NewClient creates a new EtcdCluster client
