@@ -34,7 +34,7 @@ import (
 // Client is an interface to get etcd cluster related information
 type Client interface {
 	GetStatus() (*clientv3.StatusResponse, error)
-	WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error)
+	WaitForStatus(delay time.Duration, interval time.Duration, timeout time.Duration) (*clientv3.StatusResponse, error)
 	HasTLS() bool
 }
 
@@ -108,15 +108,16 @@ func (c GenericClient) GetStatus() (*clientv3.StatusResponse, error) {
 }
 
 // WaitForStatus returns a StatusResponse after an initial delay and retry attempts
-func (c GenericClient) WaitForStatus(delay time.Duration, retries int, retryInterval time.Duration) (*clientv3.StatusResponse, error) {
+func (c GenericClient) WaitForStatus(delay time.Duration, interval time.Duration, timeout time.Duration) (*clientv3.StatusResponse, error) {
 	fmt.Printf("[util/etcd] Waiting %v for initial delay\n", delay)
 	time.Sleep(delay)
 
-	stopChan := make(chan struct{})
 	var resultStatus *clientv3.StatusResponse
 
-	wait.Until(func() {
-		if retries > 0 {
+	wait.PollImmediate(
+		interval,
+		timeout,
+		wait.ConditionFunc(func() (bool, error) {
 			fmt.Printf("[util/etcd] Attempting to get etcd status\n")
 			resp, err := c.GetStatus()
 			if err != nil {
@@ -126,14 +127,13 @@ func (c GenericClient) WaitForStatus(delay time.Duration, retries int, retryInte
 				default:
 					fmt.Printf("[util/etcd] Attempt failed with error: %v\n", err)
 				}
-				retries--
-				return
+				return false, nil
 			}
 			fmt.Printf("[util/etcd] Successfully established connection with etcd Server\n")
 			resultStatus = resp
-		}
-		close(stopChan)
-	}, retryInterval, stopChan)
+			return true, nil
+		}),
+	)
 
 	if resultStatus == nil {
 		return nil, fmt.Errorf("timeout waiting for etcd cluster status")
